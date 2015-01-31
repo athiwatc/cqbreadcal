@@ -9,6 +9,481 @@
     <link rel="stylesheet" type="text/css" media="screen" href="stylesheets/stylesheet.css">
 
     <title>Crusaders Quest Bread Calculator</title>
+    <script src="//cdn.jsdelivr.net/lodash/3.0.0/lodash.compat.min.js"></script>
+    <script>
+      /*
+ * $Id: combinatorics.js,v 0.25 2013/03/11 15:42:14 dankogai Exp dankogai $
+ *
+ *  Licensed under the MIT license.
+ *  http://www.opensource.org/licenses/mit-license.php
+ *
+ *  References:
+ *    http://www.ruby-doc.org/core-2.0/Array.html#method-i-combination
+ *    http://www.ruby-doc.org/core-2.0/Array.html#method-i-permutation
+ *    http://en.wikipedia.org/wiki/Factorial_number_system
+ */
+(function(global) {
+    'use strict';
+    if (global.Combinatorics) return;
+    var version = "0.4.0";
+    /* combinatory arithmetics */
+    var P = function(m, n) {
+        var t, p = 1;
+        if (m < n) {
+            t = m;
+            m = n;
+            n = t;
+        }
+        while (n--) p *= m--;
+        return p;
+    };
+    var C = function(m, n) {
+        return P(m, n) / P(n, n);
+    };
+    var factorial = function(n) {
+        return P(n, n);
+    };
+    var factoradic = function(n, d) {
+        var f = 1;
+        if (!d) {
+            for (d = 1; f < n; f *= ++d);
+            if (f > n) f /= d--;
+        } else {
+            f = factorial(d);
+        }
+        var result = [0];
+        for (; d; f /= d--) {
+            result[d] = Math.floor(n / f);
+            n %= f;
+        }
+        return result;
+    };
+    /* common methods */
+    var addProperties = function(dst, src) {
+        Object.keys(src).forEach(function(p) {
+            Object.defineProperty(dst, p, {
+                value: src[p]
+            });
+        });
+    };
+    var hideProperty = function(o, p) {
+        Object.defineProperty(o, p, {
+            writable: true
+        });
+    };
+    var toArray = function(f) {
+        var e, result = [];
+        this.init();
+        while (e = this.next()) result.push(f ? f(e) : e);
+        this.init();
+        return result;
+    };
+    var common = {
+        toArray: toArray,
+        map: toArray,
+        forEach: function(f) {
+            var e;
+            this.init();
+            while (e = this.next()) f(e);
+            this.init();
+        },
+        filter: function(f) {
+            var e, result = [];
+            this.init();
+            while (e = this.next()) if (f(e)) result.push(e);
+            this.init();
+            return result;
+        }
+
+    };
+    /* power set */
+    var power = function(ary, fun) {
+        if (ary.length > 32) throw new RangeError;
+        var size = 1 << ary.length,
+            sizeOf = function() {
+                return size;
+            },
+            that = Object.create(ary.slice(), {
+                length: {
+                    get: sizeOf
+                }
+            });
+        hideProperty(that, 'index');
+        addProperties(that, {
+            valueOf: sizeOf,
+            init: function() {
+                that.index = 0;
+            },
+            nth: function(n) {
+                if (n >= size) return;
+                var i = 0,
+                    result = [];
+                for (; n; n >>>= 1, i++) if (n & 1) result.push(this[i]);
+                return result;
+            },
+            next: function() {
+                return this.nth(this.index++);
+            }
+        });
+        addProperties(that, common);
+        that.init();
+        return (typeof (fun) === 'function') ? that.map(fun) : that;
+    };
+    /* combination */
+    var nextIndex = function(n) {
+        var smallest = n & -n,
+            ripple = n + smallest,
+            new_smallest = ripple & -ripple,
+            ones = ((new_smallest / smallest) >> 1) - 1;
+        return ripple | ones;
+    };
+    var combination = function(ary, nelem, fun) {
+        if (ary.length > 32) throw new RangeError;
+        if (!nelem) nelem = ary.length;
+        if (nelem < 1) throw new RangeError;
+        if (nelem > ary.length) throw new RangeError;
+        var first = (1 << nelem) - 1,
+            size = C(ary.length, nelem),
+            maxIndex = 1 << ary.length,
+            sizeOf = function() {
+                return size;
+            },
+            that = Object.create(ary.slice(), {
+                length: {
+                    get: sizeOf
+                }
+            });
+        hideProperty(that, 'index');
+        addProperties(that, {
+            valueOf: sizeOf,
+            init: function() {
+                this.index = first;
+            },
+            next: function() {
+                if (this.index >= maxIndex) return;
+                var i = 0,
+                    n = this.index,
+                    result = [];
+                for (; n; n >>>= 1, i++) if (n & 1) result.push(this[i]);
+                this.index = nextIndex(this.index);
+                return result;
+            }
+        });
+        addProperties(that, common);
+        that.init();
+        return (typeof (fun) === 'function') ? that.map(fun) : that;
+    };
+    /* permutation */
+    var _permutation = function(ary) {
+        var that = ary.slice(),
+            size = factorial(that.length);
+        that.index = 0;
+        that.next = function() {
+            if (this.index >= size) return;
+            var copy = this.slice(),
+                digits = factoradic(this.index, this.length),
+                result = [],
+                i = this.length - 1;
+            for (; i >= 0; --i) result.push(copy.splice(digits[i], 1)[0]);
+            this.index++;
+            return result;
+        };
+        return that;
+    };
+    // which is really a permutation of combination
+    var permutation = function(ary, nelem, fun) {
+        if (!nelem) nelem = ary.length;
+        if (nelem < 1) throw new RangeError;
+        if (nelem > ary.length) throw new RangeError;
+        var size = P(ary.length, nelem),
+            sizeOf = function() {
+                return size;
+            },
+            that = Object.create(ary.slice(), {
+                length: {
+                    get: sizeOf
+                }
+            });
+        hideProperty(that, 'cmb');
+        hideProperty(that, 'per');
+        addProperties(that, {
+            valueOf: function() {
+                return size;
+            },
+            init: function() {
+                this.cmb = combination(ary, nelem);
+                this.per = _permutation(this.cmb.next());
+            },
+            next: function() {
+                var result = this.per.next();
+                if (!result) {
+                    var cmb = this.cmb.next();
+                    if (!cmb) return;
+                    this.per = _permutation(cmb);
+                    return this.next();
+                }
+                return result;
+            }
+        });
+        addProperties(that, common);
+        that.init();
+        return (typeof (fun) === 'function') ? that.map(fun) : that;
+    };
+
+    var PC = function(m) {
+        var total = 0;
+        for (var n = 1; n <= m; n++) {
+            var p = P(m,n);
+            total += p;
+        };
+        return total;
+    };
+    // which is really a permutation of combination
+    var permutationCombination = function(ary, fun) {
+        // if (!nelem) nelem = ary.length;
+        // if (nelem < 1) throw new RangeError;
+        // if (nelem > ary.length) throw new RangeError;
+        var size = PC(ary.length),
+            sizeOf = function() {
+                return size;
+            },
+            that = Object.create(ary.slice(), {
+                length: {
+                    get: sizeOf
+                }
+            });
+        hideProperty(that, 'cmb');
+        hideProperty(that, 'per');
+        hideProperty(that, 'nelem');
+        addProperties(that, {
+            valueOf: function() {
+                return size;
+            },
+            init: function() {
+                this.nelem = 1;
+                // console.log("Starting nelem: " + this.nelem);
+                this.cmb = combination(ary, this.nelem);
+                this.per = _permutation(this.cmb.next());
+            },
+            next: function() {
+                var result = this.per.next();
+                if (!result) {
+                    var cmb = this.cmb.next();
+                    if (!cmb) {
+                        this.nelem++;
+                        // console.log("increment nelem: " + this.nelem + " vs " + ary.length);
+                        if (this.nelem > ary.length) return;
+                        this.cmb = combination(ary, this.nelem);
+                        cmb = this.cmb.next();
+                        if (!cmb) return;
+                    }
+                    this.per = _permutation(cmb);
+                    return this.next();
+                }
+                return result;
+            }
+        });
+        addProperties(that, common);
+        that.init();
+        return (typeof (fun) === 'function') ? that.map(fun) : that;
+    };
+    /* Cartesian Product */
+    var arraySlice = Array.prototype.slice;
+    var cartesianProduct = function() {
+        if (!arguments.length) throw new RangeError;
+        var args = arraySlice.call(arguments),
+            size = args.reduce(function(p, a) {
+                return p * a.length;
+            }, 1),
+            sizeOf = function() {
+                return size;
+            },
+            dim = args.length,
+            that = Object.create(args, {
+                length: {
+                    get: sizeOf
+                }
+            });
+        if (!size) throw new RangeError;
+        hideProperty(that, 'index');
+        addProperties(that, {
+            valueOf: sizeOf,
+            dim: dim,
+            init: function() {
+                this.index = 0;
+            },
+            get: function() {
+                if (arguments.length !== this.length) return;
+                var result = [],
+                    d = 0;
+                for (; d < dim; d++) {
+                    var i = arguments[d];
+                    if (i >= this[d].length) return;
+                    result.push(this[d][i]);
+                }
+                return result;
+            },
+            nth: function(n) {
+                var result = [],
+                    d = 0;
+                for (; d < dim; d++) {
+                    var l = this[d].length;
+                    var i = n % l;
+                    result.push(this[d][i]);
+                    n -= i;
+                    n /= l;
+                }
+                return result;
+            },
+            next: function() {
+                if (this.index >= size) return;
+                var result = this.nth(this.index);
+                this.index++;
+                return result;
+            }
+        });
+        addProperties(that, common);
+        that.init();
+        return that;
+    };
+    /* baseN */
+    var baseN = function(ary, nelem, fun) {
+                if (!nelem) nelem = ary.length;
+        if (nelem < 1) throw new RangeError;
+        var base = ary.length,
+                size = Math.pow(base, nelem);
+        if (size > Math.pow(2,32)) throw new RangeError;
+        var sizeOf = function() {
+                return size;
+            },
+            that = Object.create(ary.slice(), {
+                length: {
+                    get: sizeOf
+                }
+            });
+        hideProperty(that, 'index');
+        addProperties(that, {
+            valueOf: sizeOf,
+            init: function() {
+                that.index = 0;
+            },
+            nth: function(n) {
+                if (n >= size) return;
+                var result = [];
+                for (var i = 0; i < nelem; i++) {
+                    var d = n % base;
+                    result.push(ary[d])
+                    n -= d; n /= base
+                }
+                return result;
+            },
+            next: function() {
+                return this.nth(this.index++);
+            }
+        });
+        addProperties(that, common);
+        that.init();
+        return (typeof (fun) === 'function') ? that.map(fun) : that;
+    };
+
+    /* export */
+    addProperties(global.Combinatorics = Object.create(null), {
+        C: C,
+        P: P,
+        factorial: factorial,
+        factoradic: factoradic,
+        cartesianProduct: cartesianProduct,
+        combination: combination,
+        permutation: permutation,
+        permutationCombination: permutationCombination,
+        power: power,
+        baseN: baseN,
+        VERSION: version
+    });
+})(this);
+
+$('#but').click(function() {
+   //var food = [[600, 0], [480, 20], [180, 70], [264, 20], [99, 70], [180, 0], [144, 20], [54, 70], [100, 0], [100, 0], [100, 0], [80, 20], [80, 20], [30, 70]];
+  
+  // Take the input and convert it to our format
+  var input = $('#in').val().split(/[ ,]+/);
+  //console.log(input);
+  var food = _.chunk(_.map(input, function(f) {
+    return parseInt(f);
+  }), 2);
+  
+  // The result
+  var out = [];
+
+  while (food.length >= 6) {
+    //console.log('start', food.length);
+    // Get all the food combi
+    var cmb = Combinatorics.combination(food, 6);
+    
+    // Find great > 100% and at the least the user need
+    var great100 = [];
+    while(a = cmb.next()) {
+      if (a[0][1] + a[1][1] + a[2][1] + a[3][1] + a[4][1] + a[5][1] >= 100 && a[0][0] + a[1][0] + a[2][0] + a[3][0] + a[4][0] + a[5][0] >= parseInt($('#need').val())) {
+        great100.push(a);
+      }
+    }
+
+    // If we can't find a match then reduce the bread
+    if (great100.length == 0) {
+      setTimeout(function() {
+        $('#need').val(parseInt($('#need').val()) - 1);
+       $('#but').click();
+      }, 0);
+      return;
+    }
+    
+    // Get the least value, which is the nearest that we can get
+    // So the first one is the result
+    var results = _.sortBy(great100, function(b) {
+      return (b[0][0] + b[1][0] + b[2][0] + b[3][0] + b[4][0] + b[5][0]);
+    });
+    
+    // The best result, the least BP that match the user.
+    var best = results[0];
+    // Push it to the output
+    out.push(best);
+
+    // Remove that bread from the food list
+    for (var x = 0; x < 6; x++) {
+      var index = _.findIndex(food, function(f) {
+        if (f[0] == best[x][0] && f[1] == best[x][1]) {
+          return true;
+        } else {
+          return false;
+        }
+      });//rqwr
+      //console.log('index', index, 'best', best[x], 'f');
+      if (index > -1) {
+        food.splice(index,  1); 
+      }
+    }
+
+
+    //console.log('edd',food.length);
+  }
+
+  // output it
+  var format = "";
+  _.each(out, function(c) {
+    format += "Total value: " + (c[0][0] + c[1][0] + c[2][0] + c[3][0] + c[4][0] + c[5][0]);
+    format += "<br>Total great: " + (c[0][1] + c[1][1] + c[2][1] + c[3][1] + c[4][1] + c[5][1]);
+    format += "<br>Bread 1: value:" + c[0][0] + ' great:' + c[0][1];
+    format += "<br>Bread 2: value:" + c[1][0] + ' great:' + c[1][1];
+    format += "<br>Bread 3: value:" + c[2][0] + ' great:' + c[2][1];
+    format += "<br>Bread 4: value:" + c[3][0] + ' great:' + c[3][1];
+    format += "<br>Bread 5: value:" + c[4][0] + ' great:' + c[4][1];
+    format += "<br>Bread 6: value:" + c[5][0] + ' great:' + c[5][1];
+    format += "<hr>"
+  });
+
+  $('#fill').html(format);
+});
+    </script>
   </head>
 
   <body>
@@ -31,37 +506,10 @@
     <!-- MAIN CONTENT -->
     <div id="main_content_wrap" class="outer">
       <section id="main_content" class="inner">
-        <h3>
-<a id="welcome-to-github-pages" class="anchor" href="#welcome-to-github-pages" aria-hidden="true"><span class="octicon octicon-link"></span></a>Welcome to GitHub Pages.</h3>
-
-<p>This automatic page generator is the easiest way to create beautiful pages for all of your projects. Author your page content here using GitHub Flavored Markdown, select a template crafted by a designer, and publish. After your page is generated, you can check out the new branch:</p>
-
-<pre><code>$ cd your_repo_root/repo_name
-$ git fetch origin
-$ git checkout gh-pages
-</code></pre>
-
-<p>If you're using the GitHub for Mac, simply sync your repository and you'll see the new branch.</p>
-
-<h3>
-<a id="designer-templates" class="anchor" href="#designer-templates" aria-hidden="true"><span class="octicon octicon-link"></span></a>Designer Templates</h3>
-
-<p>We've crafted some handsome templates for you to use. Go ahead and continue to layouts to browse through them. You can easily go back to edit your page before publishing. After publishing your page, you can revisit the page generator and switch to another theme. Your Page content will be preserved if it remained markdown format.</p>
-
-<h3>
-<a id="rather-drive-stick" class="anchor" href="#rather-drive-stick" aria-hidden="true"><span class="octicon octicon-link"></span></a>Rather Drive Stick?</h3>
-
-<p>If you prefer to not use the automatic generator, push a branch named <code>gh-pages</code> to your repository to create a page manually. In addition to supporting regular HTML content, GitHub Pages support Jekyll, a simple, blog aware static site generator written by our own Tom Preston-Werner. Jekyll makes it easy to create site-wide headers and footers without having to copy them across every page. It also offers intelligent blog support and other advanced templating features.</p>
-
-<h3>
-<a id="authors-and-contributors" class="anchor" href="#authors-and-contributors" aria-hidden="true"><span class="octicon octicon-link"></span></a>Authors and Contributors</h3>
-
-<p>You can <a href="https://github.com/blog/821" class="user-mention">@mention</a> a GitHub username to generate a link to their profile. The resulting <code>&lt;a&gt;</code> element will link to the contributor's GitHub Profile. For example: In 2007, Chris Wanstrath (<a href="https://github.com/defunkt" class="user-mention">@defunkt</a>), PJ Hyett (<a href="https://github.com/pjhyett" class="user-mention">@pjhyett</a>), and Tom Preston-Werner (<a href="https://github.com/mojombo" class="user-mention">@mojombo</a>) founded GitHub.</p>
-
-<h3>
-<a id="support-or-contact" class="anchor" href="#support-or-contact" aria-hidden="true"><span class="octicon octicon-link"></span></a>Support or Contact</h3>
-
-<p>Having trouble with Pages? Check out the documentation at <a href="https://help.github.com/pages">https://help.github.com/pages</a> or contact <a href="mailto:support@github.com">support@github.com</a> and we’ll help you sort it out.</p>
+      Bread : Use the first result, the second result is the left over
+<br>Needed value: <input id="need" value="500">
+<br><input id="in" style="width: 100%" value="600,0 480,20 180,70 264,20 99,70 180,0 144,20 54,70 100,0 100,0 100,0 80,20 80,20 30,70"><button id="but">CLICK</button>
+<div id="fill"></div>
       </section>
     </div>
 
